@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sidecar-injector
+  namespace: sidecar-injector
   labels:
     app: sidecar-injector
 spec:
@@ -17,7 +18,7 @@ spec:
       serviceAccountName: sidecar-injector
       containers:
         - name: sidecar-injector
-          image: sidecar-injector
+          image: k8stage.azurecr.io/sidecar-injector:latest
           imagePullPolicy: Always
           args:
           - -service-name=sidecar-injector

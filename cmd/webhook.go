@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -105,6 +106,31 @@ func mutationRequired(ignoredList []string, metadata *metav1.ObjectMeta) bool {
 	return required
 }
 
+func addContainerResource(target []corev1.Container) (patch []patchOperation) {
+	infoLogger.Printf("addContainerResource")
+
+	for i, t := range target {
+		if t.Name != "job" {
+			continue
+		}
+		value := t.Resources.Limits
+		q, _ := resource.ParseQuantity("1")
+		value["github.com/fuse"] = q
+		patch = append(patch, patchOperation{
+			Op:    "replace",
+			Path:  fmt.Sprintf("/spec/containers/%d/resources/limits", i),
+			Value: value,
+		})
+
+		patch = append(patch, patchOperation{
+			Op:    "replace",
+			Path:  fmt.Sprintf("/spec/containers/%d/resources/requests", i),
+			Value: value,
+		})
+	}
+	return patch
+}
+
 func addContainer(target, added []corev1.Container, basePath string) (patch []patchOperation) {
 	first := len(target) == 0
 	var value interface{}
@@ -172,10 +198,11 @@ func updateAnnotation(target map[string]string, added map[string]string) (patch 
 // create mutation patch for resoures
 func createPatch(pod *corev1.Pod, sidecarConfig *Config, annotations map[string]string) ([]byte, error) {
 	var patch []patchOperation
+	infoLogger.Printf("createPatch %s", pod.Name)
 
-	patch = append(patch, addContainer(pod.Spec.Containers, sidecarConfig.Containers, "/spec/containers")...)
-	patch = append(patch, addVolume(pod.Spec.Volumes, sidecarConfig.Volumes, "/spec/volumes")...)
-	patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
+	patch = append(patch, addContainerResource(pod.Spec.Containers)...)
+	// patch = append(patch, addVolume(pod.Spec.Volumes, sidecarConfig.Volumes, "/spec/volumes")...)
+	// patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
 
 	return json.Marshal(patch)
 }
@@ -197,12 +224,12 @@ func (whsvr *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1
 		req.Kind, req.Namespace, req.Name, pod.Name, req.UID, req.Operation, req.UserInfo)
 
 	// determine whether to perform mutation
-	if !mutationRequired(ignoredNamespaces, &pod.ObjectMeta) {
-		infoLogger.Printf("Skipping mutation for %s/%s due to policy check", pod.Namespace, pod.Name)
-		return &admissionv1.AdmissionResponse{
-			Allowed: true,
-		}
-	}
+	// if !mutationRequired(ignoredNamespaces, &pod.ObjectMeta) {
+	// 	infoLogger.Printf("Skipping mutation for %s/%s due to policy check", pod.Namespace, pod.Name)
+	// 	return &admissionv1.AdmissionResponse{
+	// 		Allowed: true,
+	// 	}
+	// }
 
 	annotations := map[string]string{admissionWebhookAnnotationStatusKey: "injected"}
 	patchBytes, err := createPatch(&pod, whsvr.sidecarConfig, annotations)

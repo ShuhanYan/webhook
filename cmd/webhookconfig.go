@@ -55,7 +55,7 @@ func createOrUpdateMutatingWebhookConfiguration(caPEM *bytes.Buffer, webhookServ
 				{
 					Operations: []admissionregistrationv1.OperationType{
 						admissionregistrationv1.Create,
-						admissionregistrationv1.Update,
+						// admissionregistrationv1.Update,
 					},
 					Rule: admissionregistrationv1.Rule{
 						APIGroups:   []string{""},
@@ -64,11 +64,11 @@ func createOrUpdateMutatingWebhookConfiguration(caPEM *bytes.Buffer, webhookServ
 					},
 				},
 			},
-			NamespaceSelector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"sidecar-injection": "enabled",
-				},
-			},
+			// NamespaceSelector: &metav1.LabelSelector{
+			// 	MatchLabels: map[string]string{
+			// 		"sidecar-injection": "enabled",
+			// 	},
+			// },
 			FailurePolicy: &fail,
 		}},
 	}
