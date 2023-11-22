@@ -114,8 +114,16 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 			continue
 		}
 		value := t.Resources.Limits
-		q, _ := resource.ParseQuantity("1")
-		value["github.com/fuse"] = q
+		q, _ := resource.ParseQuantity("800Gi")
+		value["ephemeral-storage"] = q
+		cpuq, _ := resource.ParseQuantity("48")
+		value["cpu"] = cpuq
+		memoryq, _ := resource.ParseQuantity("300Gi")
+		value["memory"] = memoryq
+		gpuq, _ := resource.ParseQuantity("4")
+		value["nvidia.com/gpu"] = gpuq
+		ibq, _ := resource.ParseQuantity("1")
+		value["nvidia.com/rdma_sriov_vf"] = ibq
 		patch = append(patch, patchOperation{
 			Op:    "replace",
 			Path:  fmt.Sprintf("/spec/containers/%d/resources/limits", i),
@@ -131,78 +139,12 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 	return patch
 }
 
-func addContainer(target, added []corev1.Container, basePath string) (patch []patchOperation) {
-	first := len(target) == 0
-	var value interface{}
-	for _, add := range added {
-		value = add
-		path := basePath
-		if first {
-			first = false
-			value = []corev1.Container{add}
-		} else {
-			path = path + "/-"
-		}
-		patch = append(patch, patchOperation{
-			Op:    "add",
-			Path:  path,
-			Value: value,
-		})
-	}
-	return patch
-}
-
-func addVolume(target, added []corev1.Volume, basePath string) (patch []patchOperation) {
-	first := len(target) == 0
-	var value interface{}
-	for _, add := range added {
-		value = add
-		path := basePath
-		if first {
-			first = false
-			value = []corev1.Volume{add}
-		} else {
-			path = path + "/-"
-		}
-		patch = append(patch, patchOperation{
-			Op:    "add",
-			Path:  path,
-			Value: value,
-		})
-	}
-	return patch
-}
-
-func updateAnnotation(target map[string]string, added map[string]string) (patch []patchOperation) {
-	for key, value := range added {
-		if target == nil || target[key] == "" {
-			target = map[string]string{}
-			patch = append(patch, patchOperation{
-				Op:   "add",
-				Path: "/metadata/annotations",
-				Value: map[string]string{
-					key: value,
-				},
-			})
-		} else {
-			patch = append(patch, patchOperation{
-				Op:    "replace",
-				Path:  "/metadata/annotations/" + key,
-				Value: value,
-			})
-		}
-	}
-	return patch
-}
-
 // create mutation patch for resoures
 func createPatch(pod *corev1.Pod, sidecarConfig *Config, annotations map[string]string) ([]byte, error) {
 	var patch []patchOperation
 	infoLogger.Printf("createPatch %s", pod.Name)
 
 	patch = append(patch, addContainerResource(pod.Spec.Containers)...)
-	// patch = append(patch, addVolume(pod.Spec.Volumes, sidecarConfig.Volumes, "/spec/volumes")...)
-	// patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
 
 	return json.Marshal(patch)
 }
