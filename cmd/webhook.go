@@ -107,44 +107,131 @@ func mutationRequired(ignoredList []string, metadata *metav1.ObjectMeta) bool {
 }
 
 func addContainerResource(target []corev1.Container) (patch []patchOperation) {
-	infoLogger.Printf("addContainerResource")
-
 	for i, t := range target {
-		if t.Name != "job" {
-			continue
-		}
-		value := t.Resources.Limits
-		q, _ := resource.ParseQuantity("800Gi")
-		value["ephemeral-storage"] = q
-		cpuq, _ := resource.ParseQuantity("48")
-		value["cpu"] = cpuq
-		memoryq, _ := resource.ParseQuantity("300Gi")
-		value["memory"] = memoryq
-		gpuq, _ := resource.ParseQuantity("4")
-		value["nvidia.com/gpu"] = gpuq
-		ibq, _ := resource.ParseQuantity("1")
-		value["nvidia.com/rdma_sriov_vf"] = ibq
-		patch = append(patch, patchOperation{
-			Op:    "replace",
-			Path:  fmt.Sprintf("/spec/containers/%d/resources/limits", i),
-			Value: value,
-		})
+		// if t.Name == "init-config" {
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/initContainers/%d/image", i),
+		// 		Value: "k8stage.azurecr.io/k8s/k8-lnx_job_interactive.0.0.0-DESKTOP-2FTJPM4",
+		// 	})
+		// }
+		if t.Name == "job" {
+			value := t.Resources.Limits
+			// q, _ := resource.ParseQuantity("44")
+			// value["cpu"] = q
+			sq, _ := resource.ParseQuantity("3000Gi")
+			value["ephemeral-storage"] = sq
+			// ibq, _ := resource.ParseQuantity("1")
+			// value["rdma/hca_rdma_infiniband"] = ibq
+			patch = append(patch, patchOperation{
+				Op:    "replace",
+				Path:  fmt.Sprintf("/spec/containers/%d/resources/limits", i),
+				Value: value,
+			})
 
-		patch = append(patch, patchOperation{
-			Op:    "replace",
-			Path:  fmt.Sprintf("/spec/containers/%d/resources/requests", i),
-			Value: value,
-		})
+			patch = append(patch, patchOperation{
+				Op:    "replace",
+				Path:  fmt.Sprintf("/spec/containers/%d/resources/requests", i),
+				Value: value,
+			})
+			// volume := t.VolumeMounts
+			// volumeafter := []corev1.VolumeMount{}
+			// for _, v := range volume {
+			// 	if v.Name == "scratchvolume" {
+			// 		m := corev1.MountPropagationHostToContainer
+			// 		v.MountPropagation = &m
+			// 		volumeafter = append(volumeafter, v)
+			// 	} else if v.Name != "code" {
+			// 		volumeafter = append(volumeafter, v)
+			// 	}
+			// }
+			// patch = append(patch, patchOperation{
+			// 	Op:    "replace",
+			// 	Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+			// 	Value: volumeafter,
+			// })
+			// env := t.Env
+			// env = append(env, corev1.EnvVar{
+			// 	Name:  "NCCL_IB_HCA",
+			// 	Value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7",
+			// })
+			// env = append(env, corev1.EnvVar{
+			// 	Name:  "AMD_VISIBLE_DEVICES",
+			// 	Value: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
+			// })
+			// patch = append(patch, patchOperation{
+			// 	Op:    "replace",
+			// 	Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+			// 	Value: env,
+			// })
+		}
+		// else if t.Name == "proxy" {
+		// 	env := t.Env
+		// 	env = append(env, corev1.EnvVar{
+		// 		Name: "Fabric_NodeIPOrFQDN",
+		// 		ValueFrom: &corev1.EnvVarSource{
+		// 			FieldRef: &corev1.ObjectFieldSelector{
+		// 				FieldPath: "status.hostIP",
+		// 			},
+		// 		},
+		// 	})
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+		// 		Value: env,
+		// 	})
+		// }
 	}
 	return patch
 }
 
+func updateAnnotation(target map[string]string, added map[string]string) (patch []patchOperation) {
+	for key, value := range added {
+		if target == nil {
+			target = map[string]string{}
+		}
+		target[key] = value
+	}
+
+	patch = append(patch, patchOperation{
+		Op:    "replace",
+		Path:  "/metadata/annotations",
+		Value: target,
+	})
+	return patch
+}
+
+func updateVolume(target []corev1.Volume) (patch []patchOperation) {
+	replaced := []corev1.Volume{}
+	for _, value := range target {
+		if value.Name != "scratchvolume" && value.Name != "code" {
+			replaced = append(replaced, value)
+		}
+	}
+	replaced = append(replaced, corev1.Volume{
+		Name: "scratchvolume",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+	patch = append(patch, patchOperation{
+		Op:    "replace",
+		Path:  "/spec/volumes",
+		Value: replaced,
+	})
+	return patch
+}
+
 // create mutation patch for resoures
-func createPatch(pod *corev1.Pod, sidecarConfig *Config, annotations map[string]string) ([]byte, error) {
+func createPatch(pod *corev1.Pod) ([]byte, error) {
 	var patch []patchOperation
 	infoLogger.Printf("createPatch %s", pod.Name)
 
+	//patch = append(patch, addContainerResource(pod.Spec.InitContainers)...)
 	patch = append(patch, addContainerResource(pod.Spec.Containers)...)
+	// annotations := map[string]string{"k8s.v1.cni.cncf.io/networks": "[{ \"name\": \"ib-rdma-sriov\", \"namespace\": \"kube-system\"}, { \"name\": \"ib-rdma-sriov\", \"namespace\": \"kube-system\"}]"}
+	// patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
+	//patch = append(patch, updateVolume(pod.Spec.Volumes)...)
 
 	return json.Marshal(patch)
 }
@@ -173,8 +260,7 @@ func (whsvr *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1
 	// 	}
 	// }
 
-	annotations := map[string]string{admissionWebhookAnnotationStatusKey: "injected"}
-	patchBytes, err := createPatch(&pod, whsvr.sidecarConfig, annotations)
+	patchBytes, err := createPatch(&pod)
 	if err != nil {
 		return &admissionv1.AdmissionResponse{
 			Result: &metav1.Status{

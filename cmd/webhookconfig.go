@@ -64,11 +64,11 @@ func createOrUpdateMutatingWebhookConfiguration(caPEM *bytes.Buffer, webhookServ
 					},
 				},
 			},
-			// NamespaceSelector: &metav1.LabelSelector{
-			// 	MatchLabels: map[string]string{
-			// 		"sidecar-injection": "enabled",
-			// 	},
-			// },
+			ObjectSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"podtype": "pod-job",
+				},
+			},
 			FailurePolicy: &fail,
 		}},
 	}
