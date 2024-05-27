@@ -1,20 +1,25 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 
 	"gopkg.in/yaml.v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -112,15 +117,19 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 		// 	patch = append(patch, patchOperation{
 		// 		Op:    "replace",
 		// 		Path:  fmt.Sprintf("/spec/initContainers/%d/image", i),
-		// 		Value: "k8stage.azurecr.io/k8s/k8-lnx_job_interactive.0.0.0-DESKTOP-2FTJPM4",
+		// 		Value: "k8stage.azurecr.io/k8s/k8-lnx_job_interactive:1.0.0.0-DESKTOP-2FTJPM4",
 		// 	})
 		// }
 		if t.Name == "job" {
 			value := t.Resources.Limits
 			// q, _ := resource.ParseQuantity("44")
 			// value["cpu"] = q
-			sq, _ := resource.ParseQuantity("3000Gi")
-			value["ephemeral-storage"] = sq
+			// sq, _ := resource.ParseQuantity("30Gi")
+			// value["ephemeral-storage"] = sq
+			mq, _ := resource.ParseQuantity("25Gi")
+			value["memory"] = mq
+			// gq, _ := resource.ParseQuantity("1")
+			// value["nvidia.com/gpu"] = gq
 			// ibq, _ := resource.ParseQuantity("1")
 			// value["rdma/hca_rdma_infiniband"] = ibq
 			patch = append(patch, patchOperation{
@@ -150,14 +159,16 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 			// 	Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
 			// 	Value: volumeafter,
 			// })
+			// t.SecurityContext.Privileged = &[]bool{true}[0]
+			// patch = append(patch, patchOperation{
+			// 	Op:    "replace",
+			// 	Path:  fmt.Sprintf("/spec/containers/%d/securityContext", i),
+			// 	Value: t.SecurityContext,
+			// })
 			// env := t.Env
 			// env = append(env, corev1.EnvVar{
-			// 	Name:  "NCCL_IB_HCA",
-			// 	Value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7",
-			// })
-			// env = append(env, corev1.EnvVar{
-			// 	Name:  "AMD_VISIBLE_DEVICES",
-			// 	Value: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
+			// 	Name:  "AZUREML_COMPUTE_USE_COMMON_RUNTIME",
+			// 	Value: "true",
 			// })
 			// patch = append(patch, patchOperation{
 			// 	Op:    "replace",
@@ -165,6 +176,71 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 			// 	Value: env,
 			// })
 		}
+		// else if t.Name == "sidecar" {
+		// 	t.SecurityContext.Privileged = &[]bool{true}[0]
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/securityContext", i),
+		// 		Value: t.SecurityContext,
+		// 	})
+		// 	// env := t.Env
+		// 	// env = append(env, corev1.EnvVar{
+		// 	// 	Name:  "AZUREML_COMPUTE_USE_COMMON_RUNTIME",
+		// 	// 	Value: "true",
+		// 	// })
+		// 	// patch = append(patch, patchOperation{
+		// 	// 	Op:    "replace",
+		// 	// 	Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+		// 	// 	Value: env,
+		// 	// })
+		// 	volume := t.VolumeMounts
+		// 	volumeafter := []corev1.VolumeMount{}
+		// 	for _, v := range volume {
+		// 		if v.Name == "scratchvolume" {
+		// 			m := corev1.MountPropagationBidirectional
+		// 			v.MountPropagation = &m
+		// 		}
+		// 		volumeafter = append(volumeafter, v)
+		// 	}
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+		// 		Value: volumeafter,
+		// 	})
+		// } else if t.Name == "diagnostics" {
+		// 	value := t.Resources.Limits
+		// 	q, _ := resource.ParseQuantity("1")
+		// 	value["cpu"] = q
+		// 	// gq, _ := resource.ParseQuantity("1")
+		// 	// value["nvidia.com/gpu"] = gq
+		// 	// ibq, _ := resource.ParseQuantity("1")
+		// 	// value["rdma/hca_rdma_infiniband"] = ibq
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/resources/limits", i),
+		// 		Value: value,
+		// 	})
+
+		// 	t.SecurityContext.Privileged = &[]bool{true}[0]
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/securityContext", i),
+		// 		Value: t.SecurityContext,
+		// 	})
+		// 	volume := t.VolumeMounts
+		// 	m := corev1.MountPropagationHostToContainer
+		// 	volume = append(volume, corev1.VolumeMount{
+		// 		Name:             "sys",
+		// 		MountPath:        "/host/sys",
+		// 		ReadOnly:         true,
+		// 		MountPropagation: &m,
+		// 	})
+		// 	patch = append(patch, patchOperation{
+		// 		Op:    "replace",
+		// 		Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+		// 		Value: volume,
+		// 	})
+		// }
 		// else if t.Name == "proxy" {
 		// 	env := t.Env
 		// 	env = append(env, corev1.EnvVar{
@@ -181,6 +257,21 @@ func addContainerResource(target []corev1.Container) (patch []patchOperation) {
 		// 		Value: env,
 		// 	})
 		// }
+
+		env := t.Env
+		env = append(env, corev1.EnvVar{
+			Name:  "SINGULARITY_DISABLE_PUBLIC_NETWORKING_CHECK",
+			Value: "true",
+		})
+		// env = append(env, corev1.EnvVar{
+		// 	Name:  "AMD_VISIBLE_DEVICES",
+		// 	Value: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
+		// })
+		patch = append(patch, patchOperation{
+			Op:    "replace",
+			Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+			Value: env,
+		})
 	}
 	return patch
 }
@@ -202,16 +293,24 @@ func updateAnnotation(target map[string]string, added map[string]string) (patch 
 }
 
 func updateVolume(target []corev1.Volume) (patch []patchOperation) {
-	replaced := []corev1.Volume{}
-	for _, value := range target {
-		if value.Name != "scratchvolume" && value.Name != "code" {
-			replaced = append(replaced, value)
-		}
-	}
+	replaced := target
+	// for _, value := range target {
+	// 	if value.Name != "scratchvolume" && value.Name != "code" {
+	// 		replaced = append(replaced, value)
+	// 	}
+	// }
+	// replaced = append(replaced, corev1.Volume{
+	// 	Name: "scratchvolume",
+	// 	VolumeSource: corev1.VolumeSource{
+	// 		EmptyDir: &corev1.EmptyDirVolumeSource{},
+	// 	},
+	// })
 	replaced = append(replaced, corev1.Volume{
-		Name: "scratchvolume",
+		Name: "sys",
 		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: "/sys",
+			},
 		},
 	})
 	patch = append(patch, patchOperation{
@@ -220,6 +319,51 @@ func updateVolume(target []corev1.Volume) (patch []patchOperation) {
 		Value: replaced,
 	})
 	return patch
+}
+
+func updateImagePullSecrets() (patch []patchOperation) {
+	patch = append(patch, patchOperation{
+		Op:   "add",
+		Path: "/spec/imagePullSecrets",
+		Value: []corev1.LocalObjectReference{
+			{Name: "prejobacr05-pull-secret"},
+			{Name: "user-acr-pull-secret"},
+		},
+	})
+	return patch
+}
+
+func createSecret(namespace string) {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		infoLogger.Printf("Error building kubeconfig: %s", err.Error())
+		return
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		infoLogger.Printf("Error building kubernetes clientset: %s", err.Error())
+		return
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "prejobacr05-pull-secret",
+			Namespace: namespace,
+		},
+		StringData: map[string]string{
+			".dockerconfigjson": "eyJhdXRocyI6eyJwcmVqb2JhY3IwNS5henVyZWNyLmlvIjp7ImF1dGgiOiJjSEpsYW05aVlXTnlNRFU2Um5WWGEwVXhPSGRHWTBOc1FqUTVkeTl3WTFjdk5sazVhbnBzZEZneVQyWkhXbGx0UmtReFEwNUlLMEZEVWtGVlVHVnNNZz09In19fQ==",
+		},
+	}
+	_, err = clientset.CoreV1().Secrets(namespace).Get(context.TODO(), "prejobacr05-pull-secret", metav1.GetOptions{})
+	if err != nil && apierrors.IsNotFound(err) {
+		infoLogger.Printf("Created prejobacr05-pull-secret")
+		_, err := clientset.CoreV1().Secrets(namespace).Create(context.TODO(), secret, metav1.CreateOptions{})
+		if err != nil {
+			infoLogger.Printf("Failed to create prejobacr05-pull-secret: %s", err.Error())
+		}
+	} else if err != nil {
+		warningLogger.Printf("Failed to get prejobacr05-pull-secret: %s", err.Error())
+	}
 }
 
 // create mutation patch for resoures
@@ -232,6 +376,8 @@ func createPatch(pod *corev1.Pod) ([]byte, error) {
 	// annotations := map[string]string{"k8s.v1.cni.cncf.io/networks": "[{ \"name\": \"ib-rdma-sriov\", \"namespace\": \"kube-system\"}, { \"name\": \"ib-rdma-sriov\", \"namespace\": \"kube-system\"}]"}
 	// patch = append(patch, updateAnnotation(pod.Annotations, annotations)...)
 	//patch = append(patch, updateVolume(pod.Spec.Volumes)...)
+	patch = append(patch, updateImagePullSecrets()...)
+	createSecret(pod.Namespace)
 
 	return json.Marshal(patch)
 }
